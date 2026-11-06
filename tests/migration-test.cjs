@@ -14,7 +14,9 @@ const extension = path.resolve(__dirname, '..');
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'renamer-migration-test-'));
   const ext = path.join(tmp, 'extension');
   await fs.mkdir(ext);
-  for (const f of ['manifest.json','background.js','content.js','manager.html','manager.css','manager.mjs','core.mjs','provider.mjs']) await fs.copyFile(path.join(extension,f), path.join(ext,f));
+  for (const f of ['manifest.json','background.js','manager.html','manager.css','manager.mjs','core.mjs','provider.mjs']) await fs.copyFile(path.join(extension,f), path.join(ext,f));
+  await fs.mkdir(path.join(ext,'adapters'));
+  for (const f of ['chatgpt.js','deepseek.js']) await fs.copyFile(path.join(extension,'adapters',f), path.join(ext,'adapters',f));
   const manifest = JSON.parse(await fs.readFile(path.join(ext, 'manifest.json'), 'utf8'));
   manifest.host_permissions.push('https://model.example/*');
   await fs.writeFile(path.join(ext, 'manifest.json'), JSON.stringify(manifest));
@@ -25,6 +27,8 @@ const extension = path.resolve(__dirname, '..');
   const now=new Date().toISOString();
   const legacy={key:'old-log-1',scope,id:chatId,fromTitle:'旧版原始标题',toTitle:title,state:'applied',createdAt:now,updatedAt:now};
   const legacyRow={id:chatId,oldTitle:legacy.fromTitle,currentTitle:title,newTitle:title,selected:true,status:'applied',updateTime:Date.now()/1000};
+  // v0.4 起存储键带平台前缀；v1 旧键在连接时被复制为新键，旧键保留以便回滚。
+  const v2 = value => `renamer-v2:chatgpt:${value}`;
   const conversation=()=>({conversation_id:chatId,title,current_node:'q',mapping:{q:{parent:null,message:{id:'q',author:{role:'user'},content:{parts:['测试正文：整理旅行计划']}}}}});
   await context.route('https://chatgpt.com/**', async route => {
     const req=route.request(), url=new URL(req.url());
@@ -56,8 +60,11 @@ const extension = path.resolve(__dirname, '..');
     await manager.locator('#connect').click();await expect(manager.locator('#connectionBadge')).toHaveText('已连接');
     await manager.locator('#viewProcessed').click();
     await expect(manager.locator('#rows .rule-mark')).toContainText('当前规则未处理');
-    let record=await worker.evaluate(async scope=>(await chrome.storage.local.get(`renamer-v1:${scope}`))[`renamer-v1:${scope}`],scope);
+    let record=await worker.evaluate(async key=>(await chrome.storage.local.get(key))[key],v2(scope));
+    assert.ok(record,'旧记录应已迁移到新存储键');
     assert.equal(record.journal[0].fromTitle,legacy.fromTitle);assert.equal(record.journal[0].ruleId,undefined);
+    const legacySnapshot=await worker.evaluate(async key=>(await chrome.storage.local.get(key))[key],`renamer-v1:${scope}`);
+    assert.ok(legacySnapshot,'旧存储键应保留，便于回滚');
     // Old rename can still be restored from the unchanged original journal.
     await manager.locator('#restore').click();await manager.locator('#confirmAction').click();
     await expect(manager.locator('#status')).toContainText('已恢复 1 条');assert.equal(title,legacy.fromTitle);
@@ -74,25 +81,25 @@ const extension = path.resolve(__dirname, '..');
     await manager.locator('#autoRun').click();await expect(manager.locator('#status')).toContainText('已跳过 1 条');
     assert.equal(modelCalls,1);assert.equal(patchCalls,writes);
     // A prior success must not conceal an unresolved, newer restore attempt.
-    await worker.evaluate(async ({scope,chatId})=>{
-      const key=`renamer-v1:${scope}`,data=(await chrome.storage.local.get(key))[key];
+    await worker.evaluate(async ({key,chatId,scope})=>{
+      const data=(await chrome.storage.local.get(key))[key];
       data.journal.push({key:'unfinished-restore-fixture',scope,id:chatId,fromTitle:'旧标题',toTitle:'旅行｜行程安排',state:'restoring',createdAt:'2099-01-01T00:00:00.000Z',updatedAt:'2099-01-01T00:00:00.000Z'});
       await chrome.storage.local.set({[key]:data});
-    },{scope,chatId});
+    },{key:v2(scope),chatId,scope});
     await manager.locator('#connect').click();await manager.locator('#viewPending').click();
     await manager.locator('#autoRun').click();await expect(manager.locator('#status')).toContainText('结果未知');
     assert.equal(modelCalls,1);assert.equal(patchCalls,writes);
-    await worker.evaluate(async scope=>{
-      const key=`renamer-v1:${scope}`,data=(await chrome.storage.local.get(key))[key];
+    await worker.evaluate(async key=>{
+      const data=(await chrome.storage.local.get(key))[key];
       const entry=data.journal.find(e=>e.key==='unfinished-restore-fixture');entry.state='not-applied';entry.updatedAt='2099-01-02T00:00:00.000Z';
       await chrome.storage.local.set({[key]:data});
-    },scope);
+    },v2(scope));
     await manager.locator('#connect').click();await manager.locator('#viewPending').click();
     await manager.locator('#settings summary').click();await manager.locator('#rule').fill('规则B');await manager.locator('#rule').press('Tab');
     await manager.locator('#autoRun').click();await manager.locator('#confirmAction').click();
     await expect(manager.locator('#status')).toContainText('自动处理完成',{timeout:30000});assert.equal(modelCalls,2);
     assert.equal(patchCalls,writes,'identical resulting title must not be written again');
-    record=await worker.evaluate(async scope=>(await chrome.storage.local.get(`renamer-v1:${scope}`))[`renamer-v1:${scope}`],scope);
+    record=await worker.evaluate(async key=>(await chrome.storage.local.get(key))[key],v2(scope));
     assert.ok(record.journal.some(e=>e.key===legacy.key&&e.state==='restored'));
     console.log('PASS legacy storage restored; unknown rule not inferred; same rule skips after reload; different rule reruns. Mock data only.');
   } finally {

@@ -1,16 +1,17 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ChatGPT 聊天重命名助手</title><link rel="stylesheet" href="manager.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI 聊天重命名助手</title><link rel="stylesheet" href="manager.css"></head>
 <body>
 <main>
-  <header><div><p class="eyebrow">CHATGPT · 标题整理</p><h1>让旧聊天，一眼就能找到。</h1><p class="intro">根据正文概括标题，检查后批量应用。旧标题会保存在这台浏览器中。</p></div><span id="connectionBadge" class="badge">尚未连接</span></header>
-  <section class="connection" aria-label="连接 ChatGPT">
-    <label>ChatGPT 标签页<select id="sourceTab"><option value="">正在查找…</option></select></label>
+  <header><div><p class="eyebrow">AI 对话 · 标题整理</p><h1>让旧聊天，一眼就能找到。</h1><p class="intro">根据正文概括标题，检查后批量应用。旧标题会保存在这台浏览器中。</p></div><span id="connectionBadge" class="badge">尚未连接</span></header>
+  <section class="connection" aria-label="连接 AI 平台">
+    <label>平台<select id="platform"><option value="chatgpt">ChatGPT</option><option value="deepseek">DeepSeek</option></select></label>
+    <label>聊天标签页<select id="sourceTab"><option value="">正在查找…</option></select></label>
     <button id="refreshTabs">刷新列表</button><button id="connect" class="primary">连接当前账号</button>
-    <span id="accountLabel" class="muted">请先在浏览器登录 ChatGPT</span>
+    <span id="accountLabel" class="muted">请先在浏览器登录</span>
   </section>
   <section class="connection-summary" aria-label="连接状态">
-    <div><strong>ChatGPT 网页</strong><span id="chatStatus">尚未连接</span></div>
+    <div><strong>网页连接</strong><span id="chatStatus">尚未连接</span></div>
     <div><strong>本机服务 / 配对</strong><span id="localStatus">尚未验证</span></div>
     <div><strong>Codex 登录与模型</strong><span id="cliStatus">尚未验证</span></div>
     <p>状态仅表示本页面最近一次检查或调用；服务重启后请重新配对。<button id="checkConnection" type="button">检查本机连接</button><button id="showHelp" type="button">连接遇到问题？</button></p>
@@ -56,7 +57,7 @@
   <div class="table-wrap"><table><thead><tr><th class="selection">选择</th><th>原标题 / 最近更新</th><th>建议标题（可直接编辑）</th><th class="state-col">状态</th></tr></thead><tbody id="rows"></tbody></table><div id="empty" class="empty"><span>从一批聊天开始</span><p>扫描后选择需要整理的聊天，再按正文生成标题。</p></div></div>
   <section class="bottom-actions"><button id="exportBackup">导出标题备份</button><button id="importBackup">导入恢复记录</button><input id="backupFile" type="file" accept="application/json,.json" hidden><button id="reconcile">核对未完成操作</button><button id="restore">恢复所选的上次标题</button><span id="journalCount" class="muted"></span></section>
   <details class="manual"><summary>免 Key 批处理：交给你现有的 AI 命名，再导入结果</summary><p>每次最多10条。工具自动读取正文并准备任务；你将任务交给已有 AI，得到 JSON 标题后粘贴回来。应用和恢复仍由工具批量完成。</p><div class="manual-actions"><button id="copyTask">复制命名任务</button><button id="exportTask">导出命名任务</button></div><label>粘贴 AI 返回的 JSON<textarea id="manualResult" rows="5" placeholder='{"titles":[{"id":"聊天编号","title":"主题｜具体问题"}]}'></textarea></label><button id="importTitles">导入为标题建议</button><span id="manualHint" class="muted"></span></details>
-  <footer>当前版本通过 ChatGPT 网页内部接口处理个人聊天。接口变化、登录失效或限流时会停止；不会自动绕过验证。改名后回到 ChatGPT 刷新可查看结果。</footer>
+  <footer>当前版本通过各平台网页内部接口处理个人聊天，不改动正文，只提交标题字段。接口变化、登录失效或限流时会停止；不会自动绕过验证。改名后回到对应网页刷新可查看结果。</footer>
 </main>
 <dialog id="confirmation" aria-labelledby="confirmTitle"><form method="dialog"><div class="dialog-head"><h2 id="confirmTitle">确认本次修改</h2><button value="cancel" aria-label="关闭">×</button></div><p id="confirmText"></p><div id="confirmRows"></div><p id="confirmNote" class="note">应用前逐条核对当前标题，成功后重新读取确认。遇到异常即暂停，原文内容不会修改。</p><div class="dialog-actions"><button value="cancel">返回检查</button><button id="confirmAction" value="confirm" class="primary">确认应用</button></div></form></dialog>
 <script type="module" src="manager.mjs"></script>

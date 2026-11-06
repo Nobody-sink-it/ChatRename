@@ -17,7 +17,9 @@ const ids=['chat-0001','chat-0002','chat-0003'];
   const temporary=await fs.mkdtemp(path.join(os.tmpdir(),'chatgpt-renamer-test-'));
   const fixtureExtension=path.join(temporary,'extension');
   await fs.mkdir(fixtureExtension);
-  for(const file of ['manifest.json','background.js','content.js','manager.html','manager.css','manager.mjs','core.mjs','provider.mjs'])await fs.copyFile(path.join(extension,file),path.join(fixtureExtension,file));
+  for(const file of ['manifest.json','background.js','manager.html','manager.css','manager.mjs','core.mjs','provider.mjs'])await fs.copyFile(path.join(extension,file),path.join(fixtureExtension,file));
+  await fs.mkdir(path.join(fixtureExtension,'adapters'));
+  for(const file of ['chatgpt.js','deepseek.js'])await fs.copyFile(path.join(extension,'adapters',file),path.join(fixtureExtension,'adapters',file));
   const manifest=JSON.parse(await fs.readFile(path.join(fixtureExtension,'manifest.json'),'utf8'));
   manifest.host_permissions.push('https://model.example/*','http://127.0.0.1/*'); // Fixture-only permissions, never shipped.
   await fs.writeFile(path.join(fixtureExtension,'manifest.json'),JSON.stringify(manifest));
@@ -121,7 +123,7 @@ const ids=['chat-0001','chat-0002','chat-0003'];
     await manager.locator('#apply').click();await expect(manager.locator('#confirmRows')).toContainText(hostileTitle);assert.equal(await manager.locator('#confirmRows img').count(),0);
     await manager.locator('#confirmation button[value="cancel"]').last().click();await expect(manager.locator('#apply')).toBeEnabled();
     // A local storage failure prevents every server write.
-    await manager.evaluate(()=>{globalThis.fixtureStorageSet=chrome.storage.local.set.bind(chrome.storage.local);chrome.storage.local.set=value=>Object.keys(value).some(key=>key.startsWith('renamer-v1:'))?Promise.reject(new Error('模拟保存失败')):globalThis.fixtureStorageSet(value);});
+    await manager.evaluate(()=>{globalThis.fixtureStorageSet=chrome.storage.local.set.bind(chrome.storage.local);chrome.storage.local.set=value=>Object.keys(value).some(key=>/^renamer-v\d+:/.test(key))?Promise.reject(new Error('模拟保存失败')):globalThis.fixtureStorageSet(value);});
     await manager.locator('#apply').click();
     try{await expect(manager.locator('#confirmation')).toBeVisible({timeout:3000});}catch{throw new Error(`Expected storage-failure preview; status: ${await manager.locator('#status').textContent()}`);}
     await manager.locator('#confirmAction').click();await expect(manager.locator('#status')).toContainText('模拟保存失败');await expect(manager.locator('#apply')).toBeEnabled();assert.equal(writes.length,beforeConflict);

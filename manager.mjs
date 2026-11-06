@@ -1,9 +1,18 @@
-import { TITLE_RULE, validateTitle, validateId, extractMessages, buildExcerpt, namingPrompt, parseSuggestions, prepareEntry, reconcileEntry, providerEndpoint, backupDocument, parseBackup, namingRule, ruleCompletion, planNaming } from "./core.mjs";
+import { TITLE_RULE, validateTitle, validateId, normalizeConversation, buildExcerpt, namingPrompt, parseSuggestions, prepareEntry, reconcileEntry, providerEndpoint, backupDocument, parseBackup, namingRule, ruleCompletion, planNaming } from "./core.mjs";
 import { generateTitles, codexBridgeEndpoint } from "./provider.mjs";
+
+// 新增平台只需在这里加一项，并补一个 adapters/<id>.js。
+const PLATFORMS = {
+  chatgpt: { id:"chatgpt", name:"ChatGPT", tabPattern:"https://chatgpt.com/*", script:"adapters/chatgpt.js",
+    link:id=>`https://chatgpt.com/c/${encodeURIComponent(id)}`, titleMax:64, loginHint:"请先在浏览器登录 ChatGPT" },
+  deepseek: { id:"deepseek", name:"DeepSeek", tabPattern:"https://chat.deepseek.com/*", script:"adapters/deepseek.js",
+    link:id=>`https://chat.deepseek.com/a/chat/s/${encodeURIComponent(id)}`, titleMax:64, loginHint:"请先在浏览器登录 DeepSeek" }
+};
 
 const $ = id => document.getElementById(id);
 const states = { pending:"待生成", ready:"待检查", applied:"已应用", unchanged:"已符合规则", restored:"已恢复", no_text:"无可用文字", error:"失败", conflict:"标题冲突", uncertain:"待核对" };
-let rows = [], journal = [], scope = "", label = "", sourceTabId = null;
+let rows = [], journal = [], scope = "", label = "", sourceTabId = null, platform = "chatgpt";
+const P = () => PLATFORMS[platform] || PLATFORMS.chatgpt;
 let busy = false, stopRequested = false, controller = null, manualIds = [];
 let settings = {backend:"codex-cli",bridgeUrl:"http://127.0.0.1:18183",baseUrl:"",model:"",rule:TITLE_RULE}, apiKey = "", bridgeKey = "";
 let currentRule = null, defaultRuleId = "", manualRule = null;
@@ -13,7 +22,8 @@ let pendingEdit = Promise.resolve();
 const bodyCache = new Map();
 const pause = ms => new Promise(resolve => setTimeout(resolve,ms));
 const status = (text,error=false) => { $("status").textContent=text; $("status").classList.toggle("error",error); };
-const storageKey = () => `renamer-v1:${scope}`;
+const storageKey = () => `renamer-v2:${platform}:${scope}`;
+const legacyStorageKey = () => `renamer-v1:${scope}`;
 
 function rowTitle(row) { return row.currentTitle ?? row.oldTitle; }
 function isProcessed(row) {
@@ -39,7 +49,7 @@ function render() {
     choice.addEventListener("change",()=>{row.selected=choice.checked;updateCounts();persist().catch(showError);});
     choiceCell.append(choice);
     const oldCell = document.createElement("td"), link = document.createElement("a"), date = document.createElement("small");
-    link.href=`https://chatgpt.com/c/${encodeURIComponent(row.id)}`;link.target="_blank";link.rel="noopener";link.textContent=row.oldTitle;
+    link.href=P().link(row.id);link.target="_blank";link.rel="noopener";link.textContent=row.oldTitle;
     date.textContent=formatDate(row.updateTime);oldCell.append(link,date);
     if (row.currentTitle && row.currentTitle !== row.oldTitle) { const small=document.createElement("small");small.textContent=`当前：${row.currentTitle}`;oldCell.append(small); }
     const newCell = document.createElement("td"), input = document.createElement("input");
@@ -67,11 +77,11 @@ function render() {
   $("chatStatus").textContent=scope?`最近一次连接成功：${label}（未持续检测）`:"尚未连接，请选择标签页并点击连接";
   $("localStatus").textContent=settings.backend!=="codex-cli"?"当前使用云端 API":localCheck;
   $("cliStatus").textContent=settings.backend!=="codex-cli"?"当前未使用 Codex":lastCodexSuccess?"本页面此前 Codex 调用成功（未持续检测）":"尚未验证；保存配对码不等于已登录";
-  $("accountLabel").textContent=scope?`${label} · ${scope.slice(0,8)}`:"请先在浏览器登录 ChatGPT";
+  $("accountLabel").textContent=scope?`${label} · ${scope.slice(0,8)}`:P().loginHint;
   $("modelSummary").textContent=settings.backend==="codex-cli"?"Codex CLI · gpt-6-luna · high · fast":settings.model?`${settings.model} · ${new URL(settings.baseUrl).host}`:"尚未配置 · 也可使用下方免 Key 批处理";
   $("manualHint").textContent=manualIds.length?`等待本批 ${manualIds.length} 条标题结果`:"";
   updateCounts();
-  for(const id of ["connect","refreshTabs","sourceTab","backend","bridgeUrl","bridgeKey","saveCodex","openBridge","checkConnection","saveSettings","clearKey","baseUrl","model","apiKey","rule","resetRule","skipCompleted","days","scanLimit","scan","autoRun","generate","apply","restore","reconcile","importBackup","copyTask","exportTask","importTitles","selectVisible","unselect","viewPending","viewProcessed"]) $(id).disabled=busy;
+  for(const id of ["connect","refreshTabs","sourceTab","platform","backend","bridgeUrl","bridgeKey","saveCodex","openBridge","checkConnection","saveSettings","clearKey","baseUrl","model","apiKey","rule","resetRule","skipCompleted","days","scanLimit","scan","autoRun","generate","apply","restore","reconcile","importBackup","copyTask","exportTask","importTitles","selectVisible","unselect","viewPending","viewProcessed"]) $(id).disabled=busy;
   $("stop").disabled=!busy;
   if(!scope){for(const id of ["scan","autoRun","generate","apply","restore","reconcile","copyTask","exportTask","importTitles","exportBackup","importBackup"]) $(id).disabled=true;}
   else $("exportBackup").disabled=false;
@@ -99,29 +109,40 @@ async function persist(){
   });
 }
 async function refreshTabs(){
-  const tabs=await chrome.tabs.query({url:"https://chatgpt.com/*"});
+  const tabs=await chrome.tabs.query({url:P().tabPattern});
   const previous=Number($("sourceTab").value)||Number(new URL(location.href).searchParams.get("source"));
   $("sourceTab").replaceChildren();
-  if(!tabs.length){const option=new Option("未找到 ChatGPT 标签页，请先打开网页","");$("sourceTab").append(option);return;}
-  tabs.forEach(tab=>$("sourceTab").append(new Option(tab.title||"ChatGPT",String(tab.id))));
+  if(!tabs.length){const option=new Option(`未找到 ${P().name} 标签页，请先打开网页`,"");$("sourceTab").append(option);return;}
+  tabs.forEach(tab=>$("sourceTab").append(new Option(tab.title||P().name,String(tab.id))));
   if(tabs.some(t=>t.id===previous))$("sourceTab").value=String(previous);
 }
 async function bridge(op,args={}){
-  if(!sourceTabId)throw new Error("请先连接 ChatGPT 标签页");
+  if(!sourceTabId)throw new Error(`请先连接 ${P().name} 标签页`);
   let reply;
-  try{reply=await chrome.tabs.sendMessage(sourceTabId,{channel:"chatgpt-renamer/v1",op,scope,...args});}
-  catch{throw new Error("与 ChatGPT 标签页的连接已断开，请刷新网页后重新连接");}
-  if(!reply?.ok){const error=new Error(reply?.error?.message||"ChatGPT 返回异常");error.code=reply?.error?.code;throw error;}
+  try{reply=await chrome.tabs.sendMessage(sourceTabId,{channel:"chat-renamer/v1",op,scope,...args});}
+  catch{throw new Error(`与 ${P().name} 标签页的连接已断开，请刷新网页后重新连接`);}
+  if(!reply?.ok){const error=new Error(reply?.error?.message||`${P().name} 返回异常`);error.code=reply?.error?.code;throw error;}
   return reply.data;
+}
+// 旧版本的存储键不带平台，只可能来自 ChatGPT；复制一份到新键，旧键保留以便回滚。
+async function migrateLegacyStore(){
+  if(platform!=="chatgpt")return;
+  const target=storageKey();
+  if((await chrome.storage.local.get(target))[target])return;
+  const legacy=(await chrome.storage.local.get(legacyStorageKey()))[legacyStorageKey()];
+  if(legacy)await chrome.storage.local.set({[target]:legacy});
 }
 async function connect(){
   sourceTabId=Number($("sourceTab").value);
-  if(!sourceTabId)throw new Error("请先打开并登录 https://chatgpt.com");
+  if(!sourceTabId)throw new Error(P().loginHint);
   // Static scripts cover normal installs; injection also supports already-open tabs.
-  await chrome.scripting.executeScript({target:{tabId:sourceTabId},files:["content.js"]});
+  await chrome.scripting.executeScript({target:{tabId:sourceTabId},files:[P().script]});
   const connected=await bridge("connect");
   if(typeof connected?.scope!=="string")throw new Error("账号连接失败");
+  if(connected.platform&&connected.platform!==platform)throw new Error("标签页与所选平台不一致，请重新选择平台后再连接");
+  if(Number.isInteger(connected.titleMax))P().titleMax=connected.titleMax;
   scope=connected.scope;label=connected.label;bodyCache.clear();
+  await migrateLegacyStore();
   const saved=(await chrome.storage.local.get(storageKey()))[storageKey()];
   rows=saved?.rows||[];journal=saved?.journal||[];manualIds=saved?.manualIds||[];manualRule=saved?.manualRule||null;
   status(`已连接${label}。可以扫描聊天，或继续上次未完成的标题整理。`);render();
@@ -142,9 +163,10 @@ async function runJob(fn){
 function selected(){const chosen=visibleRows().filter(r=>r.selected);if(!chosen.length)throw new Error("请先在当前视图显示的聊天中选择");return chosen;}
 async function scan(){
   const limit=Number($("scanLimit").value),days=Number($("days").value),cutoff=days?Date.now()/1000-days*86400:0;
-  const old=new Map(rows.map(r=>[r.id,r]));const found=new Map();let offset=0,total=0;
+  const old=new Map(rows.map(r=>[r.id,r]));const found=new Map();let cursor=null,total=null,read=0;
   while(found.size<limit&&!stopRequested){
-    const page=await bridge("list",{offset});total=page.total;
+    const page=await bridge("list",{cursor});
+    if(Number.isInteger(page.total))total=page.total;
     if(!page.items.length)break;
     let allOld=true;
     for(const item of page.items){
@@ -156,12 +178,13 @@ async function scan(){
       const currentMatches=previous&&rowTitle(previous)===item.title;
       found.set(item.id,currentMatches?{...previous,updateTime:item.updateTime}:{id:item.id,oldTitle:item.title,newTitle:"",currentTitle:item.title,updateTime:item.updateTime,selected:true,status:"pending"});
     }
-    offset+=page.items.length;status(`已读取 ${offset}/${total} 条，范围内找到 ${found.size} 条…`);
-    if(offset>=total||allOld)break;
+    read+=page.items.length;status(`已读取 ${read}${total?`/${total}`:""} 条，范围内找到 ${found.size} 条…`);
+    if(!page.nextCursor||allOld)break;
+    cursor=page.nextCursor;
     await pause(650);
   }
   rows=Array.from(found.values());manualIds=[];manualRule=null;bodyCache.clear();await persist();
-  status(`${stopRequested?"已停止扫描，保留已读取结果。":"扫描完成。"}本次 ${rows.length} 条；账号列表返回总数 ${total}。项目内或归档聊天是否覆盖取决于网页接口，不代表账号全部聊天。`);
+  status(`${stopRequested?"已停止扫描，保留已读取结果。":"扫描完成。"}本次 ${rows.length} 条；${total?`账号列表返回总数 ${total}。`:"该平台按游标分页，未返回总数。"}项目内或归档聊天是否覆盖取决于网页接口，不代表账号全部聊天。`);
 }
 async function readExcerpt(row){
   try {
@@ -171,7 +194,7 @@ async function readExcerpt(row){
     row.status="conflict";row.error="标题已变化，请重新扫描";
     const error=new Error(`“${row.oldTitle}”的标题已变化，请重新扫描`);error.code="conflict";throw error;
   }
-  const messages=extractMessages(conversation);
+  const messages=normalizeConversation(platform,conversation.raw);
   if(!messages.length){const error=new Error("没有可用于命名的文字正文；图片和语音不会被自动识别");error.code="no_text";throw error;}
   const excerpt=buildExcerpt(messages);
   row.excerptInfo=`当前分支 ${excerpt.totalMessages} 条文字消息 · ${excerpt.truncated?"节选":"完整文字"}`;
@@ -274,7 +297,7 @@ async function generate(){
     const batch=chosen.slice(i,i+5),generated=await generateBatch(batch,rule,connection,i,chosen.length);if(generated===null)break;
     completed+=generated.length;failed+=batch.length-generated.length;await pause(500);
   }
-  status(`${stopRequested?"已停止。":"生成完成。"}已保存 ${completed} 条标题建议，单条失败 ${failed} 条，尚未改动 ChatGPT 标题。`);
+  status(`${stopRequested?"已停止。":"生成完成。"}已保存 ${completed} 条标题建议，单条失败 ${failed} 条，尚未改动 ${P().name} 标题。`);
 }
 function permissionPattern(url){return `${url.protocol}//${url.hostname}/*`;}
 async function saveSettings(){
@@ -315,7 +338,7 @@ async function apply(){
   verifySuggestionRule(chosen,rule);
   if(!await confirmation(chosen.map(r=>({fromTitle:rowTitle(r),toTitle:r.newTitle})),"apply"))return;
   const result=await applyRows(chosen,rule);
-  status(`${stopRequested?"已停止后续操作。":"应用完成。"}${result.applied} 条已写回并重新读取确认，${result.unchanged} 条已符合规则，${result.failed} 条标题冲突。回到 ChatGPT 刷新可查看。`);
+  status(`${stopRequested?"已停止后续操作。":"应用完成。"}${result.applied} 条已写回并重新读取确认，${result.unchanged} 条已符合规则，${result.failed} 条标题冲突。回到 ${P().name} 刷新可查看。`);
 }
 function verifySuggestionRule(chosen,rule){
   if(chosen.some(row=>row.suggestionRuleId!==rule.id))throw new Error("部分标题建议不属于当前规则或来自旧版本，请按当前规则重新生成，再应用。");
@@ -437,6 +460,15 @@ async function importTitles(){
 }
 function on(id,fn,job=false){$(id).addEventListener("click",()=>{if(job)runJob(fn);else Promise.resolve().then(fn).catch(showError);});}
 on("refreshTabs",refreshTabs);on("connect",connect,true);on("saveSettings",saveSettings);on("saveCodex",saveSettings);
+$("platform").addEventListener("change",async()=>{
+  platform=$("platform").value;
+  sourceTabId=null;scope="";label="";rows=[];journal=[];manualIds=[];manualRule=null;bodyCache.clear();
+  currentRule=await namingRule($("rule").value);
+  settings={...settings,platform};
+  await chrome.storage.local.set({"renamer-settings":settings});
+  await refreshTabs();render();
+  status(`已切换到 ${P().name}。请选择标签页并点击连接。`);
+});
 on("openBridge",()=>chrome.tabs.create({url:codexBridgeEndpoint($("bridgeUrl").value).origin+"/"}));
 on("checkConnection",async()=>{
   const revision=++connectionRevision, backend=settings.backend, address=settings.bridgeUrl, pairing=bridgeKey;
@@ -468,21 +500,25 @@ $("skipCompleted").addEventListener("change",()=>{settings={...settings,skipComp
 on("stop",()=>{stopRequested=true;controller?.abort();status("正在停止。当前写入和校验完成后停止，已完成结果会保留。");});
 on("viewPending",()=>{currentView="pending";render();});on("viewProcessed",()=>{currentView="processed";render();});
 on("selectVisible",async()=>{visibleRows().forEach(r=>r.selected=true);await persist();render();});on("unselect",async()=>{rows.filter(inCurrentView).forEach(r=>r.selected=false);await persist();render();});
-on("exportBackup",()=>download(`聊天标题备份-${new Date().toISOString().slice(0,10)}.json`,JSON.stringify(backupDocument(scope,rows,journal),null,2)));
+on("exportBackup",()=>download(`${P().name}-聊天标题备份-${new Date().toISOString().slice(0,10)}.json`,JSON.stringify(backupDocument(scope,rows,journal,platform),null,2)));
 on("importBackup",()=>$("backupFile").click());
 $("backupFile").addEventListener("change",()=>runJob(async()=>{
   const file=$("backupFile").files[0];if(!file)return;
   if(file.size>10000000)throw new Error("备份文件过大");
-  const entries=parseBackup(await file.text(),scope),existing=new Map(journal.map(e=>[e.key,e]));
+  const entries=parseBackup(await file.text(),scope,platform),existing=new Map(journal.map(e=>[e.key,e]));
   for(const e of entries){if(e.ruleId&&(await namingRule(e.ruleText)).id!==e.ruleId)throw new Error("备份中的命名规则与标记不一致，未导入");}
   for(const e of entries){if(!existing.has(e.key))existing.set(e.key,e);}
-  journal=Array.from(existing.values());await persist();$("backupFile").value="";status(`已导入恢复记录。导入不会修改 ChatGPT；选择对应聊天后可恢复。`);
+  journal=Array.from(existing.values());await persist();$("backupFile").value="";status(`已导入恢复记录。导入不会修改 ${P().name}；选择对应聊天后可恢复。`);
 }));
 on("copyTask",()=>prepareManual(false),true);on("exportTask",()=>prepareManual(true),true);on("importTitles",importTitles,true);
 $("filter").addEventListener("input",render);$("weakOnly").addEventListener("change",render);
 async function init(){
   const saved=(await chrome.storage.local.get("renamer-settings"))["renamer-settings"];
   if(saved){try{if(saved.backend==="codex-cli")codexBridgeEndpoint(saved.bridgeUrl);else providerEndpoint(saved.baseUrl);settings={...settings,...saved,backend:saved.backend||"api"};}catch{}}
+  if(saved?.platform&&PLATFORMS[saved.platform])platform=saved.platform;
+  const fromUrl=new URL(location.href).searchParams.get("platform");
+  if(fromUrl&&PLATFORMS[fromUrl])platform=fromUrl;
+  $("platform").value=platform;
   apiKey=(await chrome.storage.session.get("renamer-api-key"))["renamer-api-key"]||"";
   bridgeKey=(await chrome.storage.session.get("renamer-bridge-key"))["renamer-bridge-key"]||"";
   $("baseUrl").value=settings.baseUrl;$("model").value=settings.model;$("rule").value=settings.rule;$("apiKey").value=apiKey;

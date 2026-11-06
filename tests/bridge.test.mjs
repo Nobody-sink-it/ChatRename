@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import fs from "node:fs/promises";
 import { webcrypto } from "node:crypto";
-const source=await fs.readFile(new URL("../content.js",import.meta.url),"utf8");
+const source=await fs.readFile(new URL("../adapters/chatgpt.js",import.meta.url),"utf8");
 
 function harness({failure=null,changeOnVerify=false,sessionFailure=null,before404=false,verify404=false}={}){
   let listener,title="原标题",account="personal",user="user-a",getCount=0;
@@ -22,7 +22,7 @@ function harness({failure=null,changeOnVerify=false,sessionFailure=null,before40
   const context=vm.createContext({chrome,fetch,crypto:webcrypto,TextEncoder,AbortSignal,URL,console,setTimeout,location:{origin:"https://chatgpt.com"},localStorage:{getItem:()=>JSON.stringify(account)}});
   vm.runInContext(source,context);
   const send=(op,args={})=>new Promise(resolve=>{
-    listener({channel:"chatgpt-renamer/v1",op,...args},{id:"test-extension",url:"chrome-extension://test-extension/manager.html"},resolve);
+    listener({channel:"chat-renamer/v1",op,...args},{id:"test-extension",url:"chrome-extension://test-extension/manager.html"},resolve);
   });
   return {send,calls,getTitle:()=>title,setTitle:value=>title=value,switchAccount:()=>user="user-b",listener:()=>listener};
 }
@@ -80,7 +80,7 @@ test("PATCH后读取404必须标记未知，不能当成未写入或自动跳过
 });
 test("拒绝网页伪造消息和任意操作/编号",async()=>{
   const h=harness();
-  assert.equal(h.listener()({channel:"chatgpt-renamer/v1",op:"connect"},{id:"other",url:"https://evil.example"},()=>assert.fail()),false);
+  assert.equal(h.listener()({channel:"chat-renamer/v1",op:"connect"},{id:"other",url:"https://evil.example"},()=>assert.fail()),false);
   const {data:{scope}}=await h.send("connect");
   assert.equal((await h.send("get",{scope,id:"../../secret"})).error.code,"invalid");
   assert.equal((await h.send("delete",{scope,id:"chat-0001"})).error.code,"invalid");

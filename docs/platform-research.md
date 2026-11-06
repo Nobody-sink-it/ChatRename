@@ -9,8 +9,8 @@
 | 平台 | 标题写入 | 会话列表 | 正文读取 | 鉴权 | 状态 | 预计工作量 |
 |---|---|---|---|---|---|---|
 | ChatGPT | `PATCH /backend-api/conversation/{id}` | `GET /backend-api/conversations` | 对话树 | `/api/auth/session` 取 token | 已上线 | — |
-| DeepSeek | `POST /api/v0/chat_session/update_title` | `GET /api/v0/chat_session/fetch_page` | `GET /api/v0/chat/history_messages` | `localStorage.userToken` | **已验证** | 1 天 |
-| Claude | 同路径 `PATCH`/`PUT`，或 `POST /api/rename_chat` | `/api/organizations/{org}/chat_conversations` | 同路径下的 messages | 页面 Cookie（同源自动携带） | **待实测**（动词未定） | 1–1.5 天 |
+| DeepSeek | `POST /api/v0/chat_session/update_title` | `GET /api/v0/chat_session/fetch_page` | `GET /api/v0/chat/history_messages` | `localStorage.userToken` | **已实现（v0.4.0）** | 已完成 |
+| Claude | 同路径 `PATCH`/`PUT`，或 `POST /api/rename_chat` | `/api/organizations/{org}/chat_conversations` | 同路径下的 messages | 页面 Cookie（同源自动携带） | 暂缓（无可用账号） | 1–1.5 天 |
 | 豆包 / Kimi / 元宝 / 通义 / ChatGLM / Z.ai | 各家内部接口，形态未知 | 同左 | 同左 | 各家不同 | 待调研 | 1–2 天/家 |
 | Gemini | 网页端无标题概念，无改名入口 | — | — | — | **不可行** | — |
 | WorkBuddy | 官网只提供桌面端/移动端下载，无网页版对话入口 | — | — | — | **不可行**（当前形态） | — |
@@ -82,8 +82,8 @@ X-App-Version: 2025.04.25
 2. **它不做 API 改名**：全仓库检索 `update_title` 无结果。改名这件事在 Ophel 里没有实现，说明我们的定位（API 批量改名）是差异化的，也说明这条路的复杂度确实更高。
 3. **维护成本可视化**：每个平台一份 `*-adapter-config-hotfix-matrix.md`，DeepSeek 单独一份的 `configVersion` 已到 2，需要热修的选择器字段覆盖输入框、发送、停止、会话列表、消息、滚动、大纲、导出、网络监控等十余类。这是纯 DOM 路线的代价——我们走 API 路线，字段少得多，但换来的是"接口随时可能变"。
 
-## 六、下一步
+## 六、执行结果
 
-1. 用真实登录态对 Claude 做 15 分钟试探（三种动词按序试一条测试会话），确认改名可用性。
-2. 确认后再动 `adapters/` 重构；未确认前不要把 Claude 排进工期。
-3. DeepSeek 可直接进 P2，规格已足够实现，无需再逆向。
+- **P1 适配器骨架**：已完成。`content.js` 拆为 `adapters/chatgpt.js`，桥接契约为 `list({cursor})` → `{items,nextCursor,total}`、`get` → `{id,title,raw}`；正文归一化收在 `core.mjs` 的 `normalizeConversation(platform,raw)`，便于单测。
+- **P2 DeepSeek**：已完成并通过 39 项单测 + 4 套浏览器端集成测试。存储键升级为 `renamer-v2:<平台>:<scope>`，旧 `renamer-v1:` 在首次连接时复制迁移，旧键保留以便回滚。
+- **Claude**：暂缓。当前没有可用账号，动词未验证前不排期，也不写"未经实测"的适配器。

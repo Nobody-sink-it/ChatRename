@@ -1,7 +1,11 @@
+// ChatGPT 网页适配器。作为内容脚本运行，只负责"取数/写回"，
+// 不处理正文归一化（交给 core.mjs 的 normalizeConversation，便于单测）。
 (() => {
-  if (globalThis.__chatgptRenamerBridge) return;
-  globalThis.__chatgptRenamerBridge = true;
-  const CHANNEL = "chatgpt-renamer/v1";
+  if (globalThis.__chatRenamerChatGPT) return;
+  globalThis.__chatRenamerChatGPT = true;
+  const CHANNEL = "chat-renamer/v1";
+  const PLATFORM = "chatgpt";
+  const TITLE_MAX = 64;
   let cachedSession = null;
   class BridgeError extends Error {
     constructor(code, message) { super(message); this.code = code; }
@@ -58,17 +62,18 @@
     const data = await api(`/backend-api/conversation/${encodeURIComponent(id)}`, {method:"GET"}, scope);
     if (!data || typeof data.title !== "string" || !data.mapping || typeof data.mapping !== "object") fail("format", "无法识别聊天内容，已停止处理");
     if (data.conversation_id && data.conversation_id !== id) fail("format", "返回聊天编号与请求不符");
-    return data;
+    return { id, title: data.title, raw: data };
   }
   async function handle(message) {
     if (location.origin !== "https://chatgpt.com") fail("origin", "只允许在 ChatGPT 网页运行");
     if (message.op === "connect") {
       const s = await session(true);
-      return {scope:s.scope,label:s.label};
+      return {platform:PLATFORM, scope:s.scope, label:s.label, titleMax:TITLE_MAX};
     }
     if (typeof message.scope !== "string" || !message.scope) fail("account", "请先连接当前账号");
     if (message.op === "list") {
-      const offset = message.offset;
+      const raw = message.cursor;
+      const offset = raw === null || raw === undefined ? 0 : Number(raw);
       if (!Number.isInteger(offset) || offset < 0 || offset > 100000) fail("invalid", "分页位置不正确");
       const data = await api(`/backend-api/conversations?offset=${offset}&limit=50&order=updated`, {method:"GET"}, message.scope);
       if (!Array.isArray(data?.items) || !Number.isInteger(data.total) || data.total < 0) fail("format", "聊天列表格式已变化，已停止处理");
@@ -77,13 +82,14 @@
         if (typeof item.title !== "string") fail("format", "聊天标题格式已变化");
         return { id:item.id,title:item.title,createTime:item.create_time,updateTime:item.update_time };
       });
-      return {items,total:data.total};
+      const consumed = offset + items.length;
+      return {items, total:data.total, nextCursor: items.length && consumed < data.total ? consumed : null};
     }
     if (message.op === "get") return await get(message.id, message.scope);
     if (message.op === "rename") {
       const {id,title,expectedTitle} = message;
       validateId(id);
-      if (typeof title !== "string" || typeof expectedTitle !== "string" || (message.restore !== true && (!title.trim() || Array.from(title).length > 128 || /[\u0000-\u001f\u007f]/u.test(title)))) fail("invalid", "标题无效");
+      if (typeof title !== "string" || typeof expectedTitle !== "string" || (message.restore !== true && (!title.trim() || Array.from(title).length > TITLE_MAX || /[\u0000-\u001f\u007f]/u.test(title)))) fail("invalid", "标题无效");
       const before = await get(id,message.scope);
       if (before.title !== expectedTitle) fail("conflict", "原标题已被修改，已跳过；请重新扫描后再处理");
       await api(`/backend-api/conversation/${encodeURIComponent(id)}`, {method:"PATCH", body:JSON.stringify({title})}, message.scope);

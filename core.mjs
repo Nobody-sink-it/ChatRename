@@ -35,11 +35,12 @@ export function validateId(value) {
   return value;
 }
 
-export function validateTitle(value) {
+export function validateTitle(value, max = MAX_TITLE) {
+  if (!Number.isInteger(max) || max < 8 || max > 300) throw new Error("标题长度上限配置不正确");
   if (typeof value !== "string") throw new Error("标题必须是文字");
   const title = value.trim();
-  if (!title || Array.from(title).length > MAX_TITLE || /[\u0000-\u001f\u007f]/u.test(title)) {
-    throw new Error(`标题必须为1–${MAX_TITLE}个字符，不能包含换行或控制字符`);
+  if (!title || Array.from(title).length > max || /[\u0000-\u001f\u007f]/u.test(title)) {
+    throw new Error(`标题必须为1–${max}个字符，不能包含换行或控制字符`);
   }
   return title;
 }
@@ -75,6 +76,36 @@ export function extractMessages(conversation) {
     cursor = node.parent;
   }
   return result.reverse();
+}
+
+// DeepSeek 2026-09 起正文从 content 移入 fragments[]；两种形态都要兼容。
+const DEEPSEEK_SKIP_FRAGMENTS = new Set(["THINK", "TIP"]);
+export function normalizeDeepSeekMessages(raw) {
+  const messages = raw?.messages;
+  if (!Array.isArray(messages)) throw new Error("无法识别聊天正文格式，已停止处理");
+  const result = [];
+  for (const message of messages) {
+    const role = typeof message?.role === "string" ? message.role.toLowerCase() : "";
+    if (role !== "user" && role !== "assistant") continue;
+    if (message.status === "in_progress") continue;
+    let text = typeof message.content === "string" ? message.content : "";
+    if (!text.trim() && Array.isArray(message.fragments)) {
+      text = message.fragments
+        .filter(f => typeof f?.content === "string"
+          && !String(f?.type || "").startsWith("TOOL_")
+          && !DEEPSEEK_SKIP_FRAGMENTS.has(f.type))
+        .map(f => f.content).join("\n");
+    }
+    text = text.trim();
+    if (text) result.push({ id: String(message.id ?? result.length), role, text });
+  }
+  return result;
+}
+
+export function normalizeConversation(platform, raw) {
+  if (platform === "deepseek") return normalizeDeepSeekMessages(raw);
+  if (platform === "chatgpt") return extractMessages(raw);
+  throw new Error("暂不支持该平台的正文格式");
 }
 
 // Sample across the active branch rather than only its first user prompt.
@@ -149,17 +180,20 @@ export function reconcileEntry(entry, currentTitle) {
   return "conflict";
 }
 
-export function backupDocument(scope, rows, journal) {
+export function backupDocument(scope, rows, journal, platform = "chatgpt") {
   // Deliberate allow-list: no excerpts, provider settings, keys or auth sessions.
-  return { format: "chatgpt-renamer-backup", version: 1, exportedAt: new Date().toISOString(), scope,
+  return { format: "chatgpt-renamer-backup", version: 1, platform, exportedAt: new Date().toISOString(), scope,
     rows: rows.map(r => ({ id: r.id, oldTitle: r.oldTitle, newTitle: r.newTitle || "", status: r.status || "pending" })),
     journal: journal.filter(e => e.scope === scope).map(e => ({ key: e.key, scope: e.scope, id: e.id,
       fromTitle: e.fromTitle, toTitle: e.toTitle, state: e.state, createdAt: e.createdAt, updatedAt: e.updatedAt, ...ruleMetadata(e) })) };
 }
 
-export function parseBackup(value, scope) {
+export function parseBackup(value, scope, platform = null) {
   const parsed = typeof value === "string" ? JSON.parse(value) : value;
   if (parsed?.format !== "chatgpt-renamer-backup" || parsed.version !== 1 || parsed.scope !== scope || !Array.isArray(parsed.journal)) throw new Error("备份格式或账号/工作区不匹配");
+  // 旧备份没有 platform 字段，只可能来自 ChatGPT。
+  const source = typeof parsed.platform === "string" ? parsed.platform : "chatgpt";
+  if (platform && source !== platform) throw new Error("备份来自其他平台，未导入");
   const keys = new Set();
   const allowed = new Set(["prepared", "applied", "not-applied", "uncertain", "conflict", "restoring", "restored", "failed", "unchanged"]);
   return parsed.journal.map(e => {

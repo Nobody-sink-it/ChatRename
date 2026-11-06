@@ -14,7 +14,9 @@ const proposed = ['生成标题一','生成标题二','生成标题三'];
 async function scenario(kind) {
   const temporary=await fs.mkdtemp(path.join(os.tmpdir(),'renamer-individual-test-'));
   const ext=path.join(temporary,'extension'); await fs.mkdir(ext);
-  for (const f of ['manifest.json','background.js','content.js','manager.html','manager.css','manager.mjs','core.mjs','provider.mjs']) await fs.copyFile(path.join(root,f),path.join(ext,f));
+  for (const f of ['manifest.json','background.js','manager.html','manager.css','manager.mjs','core.mjs','provider.mjs']) await fs.copyFile(path.join(root,f),path.join(ext,f));
+  await fs.mkdir(path.join(ext,'adapters'));
+  for (const f of ['chatgpt.js','deepseek.js']) await fs.copyFile(path.join(root,'adapters',f),path.join(ext,'adapters',f));
   const manifest=JSON.parse(await fs.readFile(path.join(ext,'manifest.json'),'utf8'));
   manifest.host_permissions.push('https://model.example/*');
   await fs.writeFile(path.join(ext,'manifest.json'),JSON.stringify(manifest));
@@ -87,8 +89,8 @@ async function scenario(kind) {
     }
     if(['restore_missing','restore_conflict','restore_stop','reconcile_missing'].includes(kind)) {
       await worker.evaluate(async({ids,original,kind})=>{
-        const all=await chrome.storage.local.get(null), key=Object.keys(all).find(k=>k.startsWith('renamer-v1:'));
-        const data=all[key], scope=key.slice('renamer-v1:'.length);
+        const all=await chrome.storage.local.get(null), key=Object.keys(all).find(k=>k.startsWith('renamer-v2:')||k.startsWith('renamer-v1:'));
+        const data=all[key], scope=key.startsWith('renamer-v2:')?key.split(':').slice(2).join(':'):key.slice('renamer-v1:'.length);
         for(let i=0;i<2;i++){
           const restoring=kind==='reconcile_missing';
           data.journal.push({key:'fixture-journal-'+i,scope,id:ids[i],fromTitle:`恢复标题${i}`,toTitle:original[i],state:restoring?'uncertain':'applied',createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z'});

@@ -6,7 +6,9 @@ try{({expect}=require('playwright/test'));}catch{({expect}=require(path.join(os.
 (async()=>{
   const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'renamer-health-test-')),ext=path.join(tmp,'extension');await fs.mkdir(ext);
   const src=path.resolve(__dirname,'..');
-  for(const name of ['manifest.json','background.js','content.js','manager.html','manager.css','manager.mjs','core.mjs','provider.mjs'])await fs.copyFile(path.join(src,name),path.join(ext,name));
+  for(const name of ['manifest.json','background.js','manager.html','manager.css','manager.mjs','core.mjs','provider.mjs'])await fs.copyFile(path.join(src,name),path.join(ext,name));
+  await fs.mkdir(path.join(ext,'adapters'));
+  for(const name of ['chatgpt.js','deepseek.js'])await fs.copyFile(path.join(src,'adapters',name),path.join(ext,'adapters',name));
   const manifest=JSON.parse(await fs.readFile(path.join(ext,'manifest.json'),'utf8'));
   manifest.host_permissions.push('http://127.0.0.1/*'); // Simulate the user-granted optional permission.
   await fs.writeFile(path.join(ext,'manifest.json'),JSON.stringify(manifest));

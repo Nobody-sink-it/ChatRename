@@ -1,6 +1,8 @@
-# ChatGPT 聊天重命名助手 V0.3
+# AI 聊天重命名助手 V0.4
 
 Edge / Chrome 120及以上版本的浏览器扩展。根据所选聊天的正文，为一批历史聊天生成更明确的中文标题，再预览、修改并批量写回。不会逐个打开聊天页面点击菜单。
+
+当前支持 **ChatGPT** 与 **DeepSeek** 两个平台。两者共用同一套命名规则、模型后端和恢复记录结构，平台差异隔离在 `adapters/` 下。
 
 这是可加载的扩展源码，不是截图原型。**尚未在你的真实账号上写入标题。**V0.2已用两段虚构聊天实测本机 Codex CLI 的命名请求；真实网页接口仍需加载扩展、连接你的 ChatGPT 登录状态后验证。网页内部接口并非 OpenAI 公开稳定 API，可能因改版、账号权限、验证或限流而不可用；工具遇到这些情况会停止。
 
@@ -9,7 +11,8 @@ Edge / Chrome 120及以上版本的浏览器扩展。根据所选聊天的正文
 1. 在 Edge 打开 `edge://extensions`（Chrome 对应 `chrome://extensions`）。
 2. 开启页面上的“开发人员模式”，点击“加载解压缩的扩展”。
 3. 选择本目录 `chatgpt-renamer`。如果使用交付 ZIP，先解压，再选择里面有 `manifest.json` 的文件夹。
-4. 打开并登录 `https://chatgpt.com`，点击浏览器扩展列表里的“ChatGPT 聊天重命名助手”。
+4. V0.4 新增了 `chat.deepseek.com` 站点权限，升级后需在扩展管理页点击本扩展的“重新加载”，浏览器询问新权限时选择允许。
+5. 打开并登录 `https://chatgpt.com` 或 `https://chat.deepseek.com`，点击浏览器扩展图标；操作页会自动带入当前平台。
 
 扩展会打开自己的操作页，你仍然在原来的 ChatGPT 网页聊天。不读取浏览器 Cookie 数据库，也不要求你复制登录 Token。
 
@@ -137,12 +140,32 @@ CLI每次在独立临时目录运行，使用只读沙箱，禁用命令执行�
 - 不默认长期保存聊天正文。操作页关闭或重新连接后内存节选缓存清空；已复制或导出的任务由用户自行保管。
 - 这是由用户启动、处理所选聊天的批量工具，不会后台监听所有新聊天自动改名。
 
+## 平台差异与 DeepSeek 已知限制
+
+新增平台的差异全部收敛在 `adapters/<平台>.js` 里，上层（命名规则、模型后端、写前日志、恢复、备份）完全共用。
+
+DeepSeek 的接入方式：
+
+- **鉴权**：读取网页自己写入的 `localStorage.userToken`，在 DeepSeek 页面内发起同源请求。不读取 Cookie 数据库、不要求复制 Token、不经过第三方服务器。
+- **接口**：`/api/v0/chat_session/fetch_page` 列表、`/api/v0/chat/history_messages` 正文、`/api/v0/chat_session/update_title` 改名。
+- **分页**：游标式（`lte_cursor.pinned` + `lte_cursor.updated_at`），接口不返回总数，所以界面只显示已读取条数。游标不前进时会主动停止，避免空转。
+- **正文**：2026-09 起从 `content` 移入 `fragments[]`，两种形态都已兼容；思考片段（`THINK`）与工具片段（`TOOL_*`）不参与命名，避免把推理过程当成讨论内容。
+
+需要知道的限制：
+
+- 该平台接口在 2026 年内至少改过两次数据形态（2026-09 正文迁移、2026-10 游标布尔化）。因此**连接时会先请求一次列表做自检**，形态不符直接报错，不会带着错误假设继续写。
+- DeepSeek 没有 ChatGPT 那样的工作区概念，恢复记录按单一账号维度保存。同一浏览器切换 DeepSeek 账号时不会自动隔离；每次写入前仍会重新读取当前标题，被改动过的条目会跳过而非覆盖。
+- 标题长度上限暂按 64 字符（与 ChatGPT 相同）。如遇该平台截断或拒绝，会在状态列标为失败，不会静默写入。
+- **Gemini** 网页端没有标题概念、**WorkBuddy** 目前只有桌面端与移动端，二者都无法用浏览器扩展介入，故不纳入支持范围。
+
 ## 结构
 
 ```
 manifest.json        扩展权限和入口
 background.js        点击图标打开操作页
-content.js           ChatGPT 会话连接、分页读取、校验和title更新
+adapters/            各平台的内容脚本，只做鉴权、取数、写回
+  chatgpt.js           ChatGPT 会话连接、分页读取、校验和 title 更新
+  deepseek.js          DeepSeek 同职责实现（token、游标分页、update_title）
 core.mjs             当前分支解析、节选、结果校验、恢复数据模型
 provider.mjs         可替换的 Chat Completions 模型请求
 manager.*            批量操作界面与任务流程

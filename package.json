@@ -1,0 +1,12 @@
+{
+  "name": "chatgpt-conversation-renamer",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/core.test.mjs tests/bridge.test.mjs tests/codex.test.mjs",
+    "start:codex": "node local-codex/server.mjs",
+    "test:browser": "node tests/browser-test.cjs",
+    "package": "python scripts/package_release.py"
+  }
+}

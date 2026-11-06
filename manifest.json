@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT 聊天重命名助手",
+  "version": "0.3.0",
+  "minimum_chrome_version": "120",
+  "description": "根据聊天正文批量建议标题，预览后应用，保留旧标题并支持恢复。",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["https://chatgpt.com/*"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "action": { "default_title": "打开聊天重命名助手" },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["https://chatgpt.com/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}

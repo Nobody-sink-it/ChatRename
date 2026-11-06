@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-28T14:16:18.394Z",
+  "input": "Two fictional conversations; no user history",
+  "titles": [
+    {
+      "id": "fiction-0001",
+      "title": "AI聊天标题｜批量预览、应用与恢复"
+    },
+    {
+      "id": "fiction-0002",
+      "title": "窗函数｜汉宁窗与矩形窗的频谱泄漏"
+    }
+  ],
+  "usage": {
+    "input_tokens": 11835,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 96,
+    "reasoning_output_tokens": 32
+  },
+  "model": "gpt-6-luna",
+  "reasoning": "high",
+  "requestedServiceTier": "fast",
+  "elapsedMs": 6722
+}

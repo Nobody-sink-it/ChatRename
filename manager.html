@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ChatGPT 聊天重命名助手</title><link rel="stylesheet" href="manager.css"></head>
+<body>
+<main>
+  <header><div><p class="eyebrow">CHATGPT · 标题整理</p><h1>让旧聊天，一眼就能找到。</h1><p class="intro">根据正文概括标题，检查后批量应用。旧标题会保存在这台浏览器中。</p></div><span id="connectionBadge" class="badge">尚未连接</span></header>
+  <section class="connection" aria-label="连接 ChatGPT">
+    <label>ChatGPT 标签页<select id="sourceTab"><option value="">正在查找…</option></select></label>
+    <button id="refreshTabs">刷新列表</button><button id="connect" class="primary">连接当前账号</button>
+    <span id="accountLabel" class="muted">请先在浏览器登录 ChatGPT</span>
+  </section>
+  <section class="connection-summary" aria-label="连接状态">
+    <div><strong>ChatGPT 网页</strong><span id="chatStatus">尚未连接</span></div>
+    <div><strong>本机服务 / 配对</strong><span id="localStatus">尚未验证</span></div>
+    <div><strong>Codex 登录与模型</strong><span id="cliStatus">尚未验证</span></div>
+    <p>状态仅表示本页面最近一次检查或调用；服务重启后请重新配对。<button id="checkConnection" type="button">检查本机连接</button><button id="showHelp" type="button">连接遇到问题？</button></p>
+  </section>
+  <details id="settings" class="settings"><summary>模型与命名规则 <span id="modelSummary">尚未配置 · 也可使用下方免 Key 批处理</span></summary>
+    <div class="settings-grid">
+      <label class="wide">命名方式<select id="backend"><option value="codex-cli">本机 Codex CLI（使用已登录账号）</option><option value="api">云端模型 API（自行填写 Key）</option></select></label>
+      <div id="codexFields" class="wide settings-grid">
+        <label>本机服务地址<input id="bridgeUrl" value="http://127.0.0.1:18183" autocomplete="off"></label>
+        <label>固定模型参数<input readonly value="gpt-6-luna · high 思考 · fast 请求档位" aria-label="Codex模型参数"></label>
+        <label>本次启动的配对码<input id="bridgeKey" type="password" placeholder="打开配对页复制，不是云端 API Key" autocomplete="off"></label>
+        <div class="settings-actions"><button id="openBridge">打开本机配对页</button><button id="saveCodex">保存并授权本机连接</button></div>
+        <p class="note wide">先运行随附的「启动Codex命名服务.ps1」。正文节选经本机 CLI 发往 OpenAI，使用 Codex 账号额度；本机服务不运行模型。每次服务重启后需要重新复制配对码。</p>
+      </div>
+      <div id="cloudFields" class="wide settings-grid" hidden>
+      <label>模型 API 基础地址<input id="baseUrl" type="url" placeholder="https://你的服务商/v1" autocomplete="off"></label>
+      <label>模型名称<input id="model" placeholder="填写服务商提供的模型名称" autocomplete="off"></label>
+      <label>API Key<input id="apiKey" type="password" placeholder="仅保存在本次浏览器会话，不写入备份" autocomplete="off" spellcheck="false"></label>
+      <div class="settings-actions"><button id="saveSettings">保存并授权此 API 站点</button><button id="clearKey">清除密钥</button></div>
+      </div>
+      <label class="wide">命名规则（修改后自动保存）<textarea id="rule" rows="3" maxlength="2000"></textarea></label>
+      <div class="settings-actions wide"><button id="resetRule">恢复默认规则</button><span id="ruleInfo" class="muted"></span></div>
+    </div>
+    <p class="note">生成时仅处理所选聊天的文字节选，不发送图片、文件或 ChatGPT 网页登录凭证。Codex 模式使用账号额度；云端 API 模式按对应服务商计费。</p>
+  </details>
+  <section class="workflow" aria-label="整理步骤">
+    <div class="step"><b>01</b><span>扫描聊天</span></div><div class="step"><b>02</b><span>根据正文生成</span></div><div class="step"><b>03</b><span>检查并应用</span></div>
+  </section>
+  <section class="toolbar" aria-label="批量操作">
+    <label>范围<select id="days"><option value="30">最近30天有更新</option><option value="60" selected>最近60天有更新</option><option value="0">全部时间</option></select></label>
+    <label>最多扫描<select id="scanLimit"><option value="50">50条</option><option value="100" selected>100条</option><option value="300">300条</option><option value="1000">1000条</option></select></label>
+    <button id="scan">扫描聊天</button><button id="autoRun" class="primary">一键自动重命名</button><button id="generate">仅生成预览</button><button id="stop" class="danger" disabled>停止</button>
+    <div class="spacer"></div><button id="apply" class="primary">预览并应用</button>
+  </section>
+  <div id="status" class="status" role="status" aria-live="polite">连接后可扫描聊天。扫描与生成建议都不会修改原标题。</div>
+  <p id="progressSummary" class="progress-summary" aria-live="polite">扫描后显示当前列表的处理状态。</p>
+  <section class="list-tools"><label class="check"><input type="checkbox" id="skipCompleted" checked>跳过当前规则已处理</label><span id="ruleProgress" class="muted"></span><span class="muted">自动模式开始前确认一次，之后连续处理全部所选；换规则可以重跑。</span></section>
+  <nav class="view-switch" aria-label="聊天处理状态">
+    <button id="viewPending" type="button" aria-pressed="true">待处理 <span id="countPending">0</span></button>
+    <button id="viewProcessed" type="button" aria-pressed="false">已处理 <span id="countProcessed">0</span></button>
+  </nav>
+  <section class="list-tools"><label class="search-label"><span class="sr-only">筛选聊天标题</span><input id="filter" type="search" placeholder="筛选旧标题或新标题"></label><label class="check"><input type="checkbox" id="weakOnly">只看模糊标题</label><button id="selectVisible">选中筛选结果</button><button id="unselect">取消选择</button><span id="counts" class="muted">0条聊天</span></section>
+  <div class="table-wrap"><table><thead><tr><th class="selection">选择</th><th>原标题 / 最近更新</th><th>建议标题（可直接编辑）</th><th class="state-col">状态</th></tr></thead><tbody id="rows"></tbody></table><div id="empty" class="empty"><span>从一批聊天开始</span><p>扫描后选择需要整理的聊天，再按正文生成标题。</p></div></div>
+  <section class="bottom-actions"><button id="exportBackup">导出标题备份</button><button id="importBackup">导入恢复记录</button><input id="backupFile" type="file" accept="application/json,.json" hidden><button id="reconcile">核对未完成操作</button><button id="restore">恢复所选的上次标题</button><span id="journalCount" class="muted"></span></section>
+  <details class="manual"><summary>免 Key 批处理：交给你现有的 AI 命名，再导入结果</summary><p>每次最多10条。工具自动读取正文并准备任务；你将任务交给已有 AI，得到 JSON 标题后粘贴回来。应用和恢复仍由工具批量完成。</p><div class="manual-actions"><button id="copyTask">复制命名任务</button><button id="exportTask">导出命名任务</button></div><label>粘贴 AI 返回的 JSON<textarea id="manualResult" rows="5" placeholder='{"titles":[{"id":"聊天编号","title":"主题｜具体问题"}]}'></textarea></label><button id="importTitles">导入为标题建议</button><span id="manualHint" class="muted"></span></details>
+  <footer>当前版本通过 ChatGPT 网页内部接口处理个人聊天。接口变化、登录失效或限流时会停止；不会自动绕过验证。改名后回到 ChatGPT 刷新可查看结果。</footer>
+</main>
+<dialog id="confirmation" aria-labelledby="confirmTitle"><form method="dialog"><div class="dialog-head"><h2 id="confirmTitle">确认本次修改</h2><button value="cancel" aria-label="关闭">×</button></div><p id="confirmText"></p><div id="confirmRows"></div><p id="confirmNote" class="note">应用前逐条核对当前标题，成功后重新读取确认。遇到异常即暂停，原文内容不会修改。</p><div class="dialog-actions"><button value="cancel">返回检查</button><button id="confirmAction" value="confirm" class="primary">确认应用</button></div></form></dialog>
+<script type="module" src="manager.mjs"></script>
+</body></html>
